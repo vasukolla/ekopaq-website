@@ -1,38 +1,17 @@
-# Automated CI/CD Deployment Guide: Git Push to Google Cloud
+# Automated CI/CD Deployment Guide: Workload Identity Federation
 
 We have successfully deployed the **Ekopaq Website** to Google Cloud Run! 
 * **Live App URL:** https://ekopaq-website-llwcgwsnsa-as.a.run.app
 
-To automate this so that every time you push to GitHub, the live site is automatically rebuilt and updated, you can use one of two methods:
+Since your Google Cloud organization has policies that disable service account key creation (which is a standard security best-practice), we have configured **Workload Identity Federation**. 
+
+This is an **ultra-secure, keyless** authentication mechanism. GitHub Actions authenticates dynamically using open-standard tokens (OIDC) directly with Google Cloud. **No passwords or secret keys are stored on GitHub.**
 
 ---
 
-## 🛠️ Choice A: GitHub Actions (Recommended)
-This is the most standard, clean, and flexible approach. You don't need to configure anything in the Google Cloud Console UI. It uses a workflow file in your codebase to build and deploy.
+## 🛠️ GitHub Actions Workflow Configuration
+We have already created the workflow file at `.github/workflows/deploy.yml` and pre-configured everything for you. Here is the configuration:
 
-### Step 1: Create a Service Account Key
-To allow GitHub Actions to safely deploy to your Google Cloud Project, you need a key for the newly created `github-deployer` service account.
-
-Run this command in your local terminal to generate the key file:
-```bash
-gcloud iam service-accounts keys create gcp-key.json \
-  --iam-account=github-deployer@ekopaq-496610.iam.gserviceaccount.com
-```
-
-### Step 2: Add the Key to GitHub Secrets
-1. Open your GitHub Repository in the browser: [vasukolla/ekopaq-website](https://github.com/vasukolla/ekopaq-website).
-2. Go to **Settings** -> **Secrets and variables** -> **Actions**.
-3. Click **New repository secret**.
-4. Set the **Name** to: `GCP_SA_KEY`
-5. Open the local `gcp-key.json` file you generated, copy its entire contents (JSON format), and paste it into the **Value** box.
-6. Click **Add secret**.
-7. *(Important)* Delete the local `gcp-key.json` file from your computer immediately for security!
-   ```bash
-   rm gcp-key.json
-   ```
-
-### Step 3: We create the GitHub Actions Workflow
-We have prepared the workflow file at `.github/workflows/deploy.yml` with the following configuration:
 ```yaml
 name: Deploy to Google Cloud Run
 
@@ -51,14 +30,20 @@ jobs:
     name: Build and Deploy to Cloud Run
     runs-on: ubuntu-latest
 
+    # Required permissions for keyless dynamic auth
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Google Auth
+      - name: Google Auth (Workload Identity Federation)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: 'projects/1017665393092/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-deployer@ekopaq-496610.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -84,30 +69,15 @@ jobs:
 
 ---
 
-## ☁️ Choice B: Google Cloud Build Trigger (GCP Native)
-This uses Google Cloud's native trigger service to watch your GitHub repository.
+## 🚀 How to trigger your first deploy:
+Since all OIDC federation and project permissions are fully configured on your Google Cloud Console, **everything is 100% ready to run!**
 
-### Step 1: Connect your GitHub Repo to GCP
-1. Go to the [Google Cloud Build Triggers page](https://console.cloud.google.com/cloud-build/triggers;region=asia-southeast1?project=ekopaq-496610).
-2. Click **Manage Repositories** -> **Connect Repository**.
-3. Select **GitHub (Cloud Build GitHub App)** and authorize access.
-4. Select your repository: `vasukolla/ekopaq-website` and click **Connect**.
-
-### Step 2: Create the Trigger
-Run this single gcloud command in your terminal once the repository is connected:
-```bash
-gcloud beta builds triggers create github \
-  --name="ekopaq-deploy-trigger" \
-  --repo-owner="vasukolla" \
-  --repo-name="ekopaq-website" \
-  --branch-pattern="^main$" \
-  --build-config="cloudbuild.yaml" \
-  --region="asia-southeast1" \
-  --project="ekopaq-496610"
-```
-Whenever a push happens on `main`, Google Cloud Build will automatically run the local `cloudbuild.yaml` to build and deploy the update.
-
----
-
-### Which do you prefer?
-Let me know which option you would like to proceed with, and I can generate the `.github/workflows/deploy.yml` file for you if you choose Choice A!
+Simply push any commit to your `main` branch:
+1. Make any change in the code.
+2. Run:
+   ```bash
+   git add -A
+   git commit -m "Trigger deployment"
+   git push origin main
+   ```
+3. Go to the **Actions** tab on your GitHub Repository page [vasukolla/ekopaq-website](https://github.com/vasukolla/ekopaq-website) to watch the live build and deploy process in real-time!
